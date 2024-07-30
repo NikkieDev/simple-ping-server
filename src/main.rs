@@ -1,72 +1,28 @@
-use std::{thread, net, time::Duration};
-use std::io::prelude::*;
-use std::io;
+use dotenv::dotenv;
+use std::thread;
 
-struct ConnectionWithClient {
-    uid: i32,
-    stream: net::TcpStream,
-    addr: net::SocketAddr,
-}
-
-fn initiate_new_client(connection: ConnectionWithClient) -> i32 {
-    let connection_id: String = connection.uid.to_string();
-    let _addr: net::SocketAddr = connection.addr;
-    let mut stream: &net::TcpStream = &connection.stream;
-
-    let mut pings: i32 = 0;
-
-    println!("Connection UID: {}", connection_id);
-
-    loop {
-        if pings >= 5 {
-            println!("All pings to connection '{}' have been send & received, closing connection.", connection_id);
-            break;
-        }
-
-        let write_status = stream.write_all("Ping!\n".as_bytes());
-        match write_status {
-            Ok(()) => pings += 1,
-            Err(ref e) => {
-                if e.kind() == io::ErrorKind::BrokenPipe {
-                    println!("Connection '{}' closed by client.", connection_id);
-                    break;
-                } else {
-                    println!("Unexpected error: {}", e)
-                }
-            },
-        };
-
-        thread::sleep(Duration::from_millis(1000));
-    }
-
-
-    return 0;
-}
+pub mod network;
 
 fn main() {
-    println!("Initialising Server");
-    let mut connections_created: i32 = 0;
+    println!("Starting server");
+    dotenv().ok(); // initialize env variables;
 
-    let socket_listener = net::TcpListener::bind("0.0.0.0:8000").unwrap();
+    let server_port: &str = &std::env::var("SERVER_PORT").expect("Server Port must be set");
     
-    loop {
-        match socket_listener.accept() {
-            Ok((sock, addr)) => {
-                connections_created += 1;
+    let listener = network::start_listen(server_port);
 
-                thread::spawn(move || {
-                    println!("Created thread handling user '{addr:?}'");
+    let t_accept_connections: thread::JoinHandle<_> = thread::spawn(move || {
+        println!("Spanwed connection accepting thread");
+        
+        loop {
+            match listener.accept() {
+                Ok((_sock, addr)) => {
+                    println!("Connection from '{}'", addr);
+                },
+                Err(_e) => println!("Couldn't accept client"),
+            }
+        }
+    });
 
-                    let connection: ConnectionWithClient = ConnectionWithClient {
-                        uid: connections_created,
-                        stream: sock,
-                        addr: addr
-                    };
-
-                    initiate_new_client(connection);
-                });
-            },
-            Err(e) => println!("Couldn't accept client: {e:?}"),
-        };
-    }
+    t_accept_connections.join().expect("The connection acception thread has panicked!");
 }
